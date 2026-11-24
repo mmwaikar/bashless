@@ -1,32 +1,57 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context — shown to AI when creating artifacts.
+context: |
+  Product: bashless — a dax-style Rust library for shell scripting in typed Rust.
+  Tagline: shell scripting without writing bash. NOT a shell: no interactive shell,
+  no full-bash compatibility (that is brush's niche), no invented syntax — Rust is
+  the host language, and the differentiator is testable/mockable commands ("pytest
+  for shell scripts").
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Architecture (proven in the PoC): two layers behind one facade:
+  - typed layer: xshell 0.2.7 — cmd! compile-time argv, injection-proof
+    interpolation, RAII push_dir/push_env, non-zero exit = error
+  - script layer: deno_task_shell pinned =0.33.3 (pre-1.0, API churns — engine
+    upgrades are their own change) — bash SUBSET only: pipelines, &&/||/;, globs,
+    $(), vars; NO if/for/while: control flow belongs in Rust by design
+  - mock layer: commands resolve against a custom registry
+    (HashMap<String, Rc<dyn ShellCommand>>) BEFORE PATH — the dax-style mocking
+    differentiator
+  - capture: execute_with_pipes + pipe() + pipe_to_string_handle for captured
+    stdout/stderr in tests
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  Verified traps (do not rediscover these): run under a tokio current-thread
+  runtime and create pipe() handles inside block_on (pipe_to_string_handle panics
+  outside a tokio context); the stack is !Send (Rc, LocalBoxFuture) —
+  single-threaded only; scripts get no env/cwd back-propagation (EnvChange is
+  consumed internally) — mirror overrides in an env HashMap; xshell's env map is
+  private.
+
+  Product shape: library crate first (thin runner bin later, second crate).
+  Real error type at every trust boundary (script parse, non-zero exit, spawn
+  failure) — no unwrap()/expect() in library code. Windows support is mandatory:
+  cross-platform evaluation without /bin/sh is the core promise. Zero runtime
+  dependencies for users; dev-time npm tooling (openspec) is fine.
+
+  Conventions: decisions and gotchas are logged append-only in the workspace Q&A
+  log (QnA.md, per the AGENTS.md rule); specs in openspec/ are the source of truth
+  for what to build — the Q&A log records why.
+
+# Per-artifact rules
+rules:
+  proposal:
+    - "State which layer(s) the change touches: typed / script-engine / mock-capture / runner"
+    - Non-goals section mandatory; full-bash compatibility and interactive-shell features are permanent non-goals
+  tasks:
+    - Library code returns Result with the crate error type at trust boundaries; no unwrap/expect
+    - Behavior changes include or update integration tests; prefer mocked external commands (e.g. git) over real ones in tests
+
+# Per-operation guidance
+operations:
+  apply:
+    guidance:
+      - After code-touching tasks, cargo build and cargo test must pass; report failures honestly instead of marking tasks done
+      - Gotchas discovered while applying go to the Q&A log, not just the change folder
+  archive:
+    guidance:
+      - Confirm spec deltas were folded into specs/ and new gotchas reached the Q&A log before archiving
